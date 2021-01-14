@@ -9,6 +9,8 @@
 
 ![](figs/rosgraph.png)
 
+
+
 ## 车辆模型:
 
 ![](figs/vehicle_model.png)
@@ -20,6 +22,8 @@ $\theta$: 车辆的朝向
 $L$:  轴距
 
 $\rho$:  转弯半径
+
+
 $$
 \begin{bmatrix}
 \dot{x} \\
@@ -33,6 +37,8 @@ v \begin{bmatrix}
 \end{bmatrix}
 $$
 更新方程:
+
+
 $$
 \begin{bmatrix}
 x_{k+1} \\
@@ -67,6 +73,8 @@ $$
 \{L_\alpha R_\beta L_\gamma, R_\alpha L_\beta R_\gamma,L_\alpha S_d L_\gamma,L_\alpha S_dR_\gamma,R_\alpha S_d L_\gamma,R_\alpha S_d R_\gamma\}
 $$
 其中 $\alpha\in [0, 2\pi), \gamma \in [0, 2\pi), \beta \in (\pi, 2\pi), d \geq 0$.
+
+
 
 #### 计算Dubin 路径
 
