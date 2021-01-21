@@ -130,7 +130,6 @@ class HybridAStar {
                     const std::shared_ptr<Node3d> &right) const;
   };
 
-  void CalcNodCost(const std::shared_ptr<Node3d> &current_node, const std::shared_ptr<Node3d> &next_node);
   void SetGoal(const geometry_msgs::PoseStamped::Ptr &goal);
   void SetStart(const geometry_msgs::PoseWithCovarianceStamped::Ptr &start);
   void SetMap(const nav_msgs::OccupancyGrid::Ptr &grid_map);
@@ -158,7 +157,6 @@ class HybridAStar {
   double max_steer_angle_ = 0.0;
   double adc_width_ = 0.0;
   double adc_length_ = 0.0;
-  double axle_ref_x_ = 0.0;
   double wheel_base_ = 0.0;
   double xy_resolution_ = 0.0;
   double phi_resolution_ = 0.0;

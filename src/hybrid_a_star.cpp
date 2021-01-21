@@ -63,26 +63,27 @@ HybridAStar::HybridAStar(const ros::NodeHandle &nh) {
   ha_star_path_publisher_ = nh_.advertise<nav_msgs::Path>("/ha_path", 1);
   visualized_vehicle_publisher_ = nh_.advertise<visualization_msgs::MarkerArray>("/visualized_vehicle", 1);
   visulized_path_publisher_ = nh_.advertise<visualization_msgs::MarkerArray>("/visualized_path", 1);
-  grid_map_subscriber_ = nh_.subscribe("/map", 10, &HybridAStar::SetMap, this);
-  init_pose_subscriber_ = nh_.subscribe("/initialpose", 10, &HybridAStar::SetStart, this);
-  goal_pose_subscriber_ = nh_.subscribe("/move_base_simple/goal", 10, &HybridAStar::SetGoal, this);
+
   nh_.param<int>("/next_node_num", next_node_num_, 10);
-  nh_.param<double>("/max_steer_angle", max_steer_angle_, M_PI / 6.0);
-  nh_.param<double>("/adc_width", adc_width_, 1.1);
-  nh_.param<double>("/adc_length", adc_length_, 2);
-  nh_.param<double>("/axle_ref_x", axle_ref_x_, 0.3);
+  nh_.param<double>("/max_steer_angle", max_steer_angle_, M_PI / 5.0);
+  nh_.param<double>("/adc_width", adc_width_, 1.5);
+  nh_.param<double>("/adc_length", adc_length_, 3.0);
   nh_.param<double>("/phi_resolution", phi_resolution_, 0.1);
-  nh_.param<double>("/traj_forward_penalty", traj_forward_penalty_, 1.0);
-  nh_.param<double>("/traj_backward_penalty", traj_backward_penalty_, 1.0);
-  nh_.param<double>("/traj_gear_switch_penalty", traj_gear_switch_penalty_, 1.0);
-  nh_.param<double>("/traj_steer_penalty", traj_steer_penalty_, 0.88);
-  nh_.param<double>("/traj_steer_change_penalty", traj_steer_change_penalty_, 1.0);
-  nh_.param<double>("/traj_step_length_penalty", traj_step_length_penalty_, 1.0);
+  nh_.param<double>("/traj_forward_penalty", traj_forward_penalty_, .5);
+  nh_.param<double>("/traj_backward_penalty", traj_backward_penalty_, 0.8);
+  nh_.param<double>("/traj_gear_switch_penalty", traj_gear_switch_penalty_, 1.);
+  nh_.param<double>("/traj_steer_penalty", traj_steer_penalty_, 0.1);
+  nh_.param<double>("/traj_steer_change_penalty", traj_steer_change_penalty_, .5);
+  nh_.param<double>("/traj_step_length_penalty", traj_step_length_penalty_, 0.1);
   nh_.param<double>("/step_size", step_size_, 0.7);
-  nh_.param<double>("/wheel_base", wheel_base_, 1.2);
+  nh_.param<double>("/wheel_base", wheel_base_, 1.6);
   nh_.param<bool>("/enable_backward", enable_backward_, true);
   nh_.param<double>("/delta_t", delta_t_, 0.4);
   nh_.param<double>("/anlytic_expand_distance", anlytic_expand_distance_, 10);
+
+  grid_map_subscriber_ = nh_.subscribe("/map", 10, &HybridAStar::SetMap, this);
+  init_pose_subscriber_ = nh_.subscribe("/initialpose", 10, &HybridAStar::SetStart, this);
+  goal_pose_subscriber_ = nh_.subscribe("/move_base_simple/goal", 10, &HybridAStar::SetGoal, this);
   heuristic_generator_ = std::make_unique<AStar>();
 }
 
@@ -259,7 +260,6 @@ bool HybridAStar::Search(double sx, double sy,
         break;
       }
     }
-    ros::Time t1 = ros::Time::now();
     if (*(current_node) == *(end_node_)) {
       final_node_ = current_node;
       break;
@@ -283,7 +283,7 @@ bool HybridAStar::Search(double sx, double sy,
         expand_node_num++;
         next_node->SetGCost(tentative_gcost);
 
-        next_node->SetHCost(std::max(HoloWithObstacleHeuristic(next_node), NonHoloWithoutObstacleHeuristic(next_node)));
+        next_node->SetHCost(tie_breaker * std::max(HoloWithObstacleHeuristic(next_node), NonHoloWithoutObstacleHeuristic(next_node)));
 
         next_node->SetPreNode(current_node);
         open_set_.emplace(next_node->GetIndex(), next_node);
@@ -519,7 +519,7 @@ bool HybridAStar::CheckNode3d(const std::shared_ptr<Node3d> &node) {
     const double y = traversed_y[i];
     const double phi = traversed_phi[i];
     if (!CheckPose3d(x, y, phi, adc_length_,
-                     adc_width_, axle_ref_x_, 0.5, grid_map_)) {
+                     adc_width_, wheel_base_ / 2.0, 0.5, grid_map_)) {
       return false;
     }
   }
@@ -734,7 +734,7 @@ void HybridAStar::SetGoal(const geometry_msgs::PoseStamped_<std::allocator<void>
       goal->pose.position.y,
       tf::getYaw(goal->pose.orientation),
       adc_length_, adc_width_,
-      axle_ref_x_, 2.0 * grid_map_->info.resolution, grid_map_)) {
+      wheel_base_ / 2.0, 2.0 * grid_map_->info.resolution, grid_map_)) {
     valid_goal_ = false;
     return;
   }
@@ -745,7 +745,7 @@ void HybridAStar::SetGoal(const geometry_msgs::PoseStamped_<std::allocator<void>
 
   if (valid_goal_ && has_grid_map_) {
     heuristic_generator_->SetMap(grid_map_);
-    heuristic_generator_->SetVhicleParams(adc_length_, adc_width_, axle_ref_x_);
+    heuristic_generator_->SetVhicleParams(adc_length_, adc_width_, wheel_base_ / 2.0);
     if (!heuristic_generator_->GenerateDpMap(goal_pose_.pose.position.x, goal_pose_.pose.position.y)) {
       has_dp_map_ = false;
       return;
@@ -759,18 +759,12 @@ void HybridAStar::SetGoal(const geometry_msgs::PoseStamped_<std::allocator<void>
   }
 }
 
-void HybridAStar::CalcNodCost(const std::shared_ptr<Node3d> &current_node, const std::shared_ptr<Node3d> &next_node) {
-  next_node->SetGCost(current_node->GetGCost() + EdgeCost(current_node, next_node));
-  double optimal_path_cost = 0.0;
-  optimal_path_cost += std::max(HoloWithObstacleHeuristic(next_node), NonHoloWithoutObstacleHeuristic(next_node));
-  next_node->SetHCost(optimal_path_cost);
-}
 void HybridAStar::SetStart(const geometry_msgs::PoseWithCovarianceStamped_<std::allocator<void>>::Ptr &start) {
   if (!has_grid_map_) {
     return;
   }
   if (!CheckPose3d(start->pose.pose.position.x, start->pose.pose.position.y, tf::getYaw(start->pose.pose.orientation),
-      adc_length_, adc_width_, axle_ref_x_, 2.0 * grid_map_->info.resolution, grid_map_)) {
+      adc_length_, adc_width_, wheel_base_ / 2.0, 2.0 * grid_map_->info.resolution, grid_map_)) {
     valid_start_ = false;
     return;
   }
