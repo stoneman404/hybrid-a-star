@@ -405,9 +405,11 @@ $h_\text{holo}$ 为不考虑机器人的非完整约束，考虑环境中的障�
 
 ![](figs/hybrid_astar_result1.png)
 
-![](figs/hybrid_astar_result2.png)
-
 ![](figs/hybrid_astar_result3.png)
+
+![](figs/hybrid_astar_result4.png)
+
+![](figs/hybrid_astar_result7.png)
 
 ## Future Works
 
