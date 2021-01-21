@@ -96,12 +96,7 @@ void HybridAStar::RunOnce() {
               valid_goal_ ? "true" : "false");
     return;
   }
-  int start_id_x, start_id_y;
-  Pose2Index(start_pose_.pose.pose.position.x, start_pose_.pose.pose.position.y, grid_map_, &start_id_x,
-             &start_id_y);
-  double start_x, start_y;
 
-  Index2Pose(start_id_x, start_id_y, grid_map_, &start_x, &start_y);
   HybridAStarResult result;
 //  AStarResult result;
   double sx = start_pose_.pose.pose.position.x;
