@@ -1,6 +1,3 @@
-//
-// Created by ldh on 20-7-14.
-//
 #include <ros/ros.h>
 #include <hybrid_a_star.hpp>
 

@@ -1,6 +1,3 @@
-//
-// Created by ldh on 20-7-17.
-//
 #include "graph_search_utils.hpp"
 
 namespace planning {
