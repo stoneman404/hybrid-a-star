@@ -109,8 +109,8 @@ bool AStar::SearchPath(double sx, double sy, double ex, double ey, AStarResult *
   result->x.clear();
   result->y.clear();
   boost::heap::binomial_heap<std::shared_ptr<Node2d>, boost::heap::compare<cmp>> priority_queue;
-  std::unordered_map<std::string, boost::heap::binomial_heap<std::shared_ptr<Node2d>,
-                                                             boost::heap::compare<cmp>>::handle_type> open_set_handles;
+  std::unordered_map<std::string, boost::heap::binomial_heap < std::shared_ptr<Node2d>,
+  boost::heap::compare < cmp >> ::handle_type > open_set_handles;
   std::unordered_map<std::string, std::shared_ptr<Node2d>> open_set;
   std::unordered_map<std::string, std::shared_ptr<Node2d>> close_set;
   std::shared_ptr<Node2d> start_node = std::make_shared<Node2d>(sx, sy, grid_map_);
@@ -182,7 +182,7 @@ bool AStar::GenerateDpMap(double ex, double ey) {
 
   boost::heap::binomial_heap<std::shared_ptr<Node2d>, boost::heap::compare<cmp>> priority_queue;
   std::unordered_map<std::string,
-                     boost::heap::binomial_heap<std::shared_ptr<Node2d>, boost::heap::compare<cmp>>::handle_type> open_set_handles;
+  boost::heap::binomial_heap < std::shared_ptr<Node2d>, boost::heap::compare < cmp >> ::handle_type > open_set_handles;
   std::unordered_map<std::string, std::shared_ptr<Node2d>> open_set;
 
   end_node->SetPreNode(nullptr);

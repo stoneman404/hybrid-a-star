@@ -14,7 +14,7 @@ find_package(catkin REQUIRED COMPONENTS
         rospy
         std_msgs
         tf
-#        ompl
+        #        ompl
         )
 find_package(OMPL REQUIRED)
 find_package(Eigen3 REQUIRED)
