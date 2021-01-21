@@ -2,6 +2,7 @@
 #define PLANNING_ALGORITHM_SRC_GRAPH_SEARCH_PLANNER_INCLUDE_A_STAR_HPP_
 
 #include <ros/ros.h>
+#include <utility>
 #include <vector>
 #include <string>
 #include <unordered_map>
@@ -12,12 +13,13 @@
 #include <map>
 
 namespace planning {
+
 class Node2d {
 public:
     Node2d(
         double x, double y,
         nav_msgs::OccupancyGrid::Ptr grid_map) {
-        Pose2Index(x,y, grid_map, &index_x_, &index_y_);
+        Pose2Index(x,y, std::move(grid_map), &index_x_, &index_y_);
         index_ = std::to_string(index_x_) + "_" + std::to_string(index_y_);
     }
     Node2d(int x, int y) {
@@ -36,8 +38,9 @@ public:
         fcost_ = gcost_ + hcost_;
     }
     void SetPreNode(std::shared_ptr<Node2d> pre_node) {
-        pre_node_ = pre_node;
+        pre_node_ = std::move(pre_node);
     }
+
 
     /////////////////// getter ///////////////////////
     double GetHCost() const { return hcost_; }
@@ -51,7 +54,6 @@ public:
     bool operator==(const Node2d &other) const {
         return other.GetIndex() == index_;
     }
-protected:
 
 private:
     double gcost_ = 0.0;
@@ -59,7 +61,7 @@ private:
     double hcost_ = 0.0;
     int index_x_ = 0;
     int index_y_ = 0;
-    std::string index_ = "";
+    std::string index_;
     std::shared_ptr<Node2d> pre_node_ = nullptr;
 };
 
@@ -77,7 +79,7 @@ public:
     void SetVhicleParams(double length, double width, double axle_ref_x){
         length_= length;
         width_ = width;
-        axle_ref_x_ = axle_ref_x_;
+        axle_ref_x_ = axle_ref_x;
     }
     bool SearchPath(double sx, double sy, double ex, double ey, AStarResult *result);
 
@@ -165,11 +167,11 @@ protected:
     };
 
 private:
-    double length_;
-    double width_;
-    double axle_ref_x_;
-    double xy_resolution_;
-    double node_radius_;
+    double length_{};
+    double width_{};
+    double axle_ref_x_{};
+    double xy_resolution_{};
+    double node_radius_{};
     std::shared_ptr<Node2d> start_node_ = nullptr;
     std::shared_ptr<Node2d> goal_node_ = nullptr;
     std::shared_ptr<Node2d> final_node_ = nullptr;

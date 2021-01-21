@@ -2,6 +2,7 @@
 #include <cmath>
 #include <hybrid_a_star.hpp>
 #include <graph_search_utils.hpp>
+#include <utility>
 #include <nav_msgs/Path.h>
 #include <ompl/base/spaces/ReedsSheppStateSpace.h>
 #include <ompl/base/spaces/DubinsStateSpace.h>
@@ -22,7 +23,7 @@ Node3d::Node3d(double x, double y, double phi,
   x_ = x;
   y_ = y;
   phi_ = phi;
-  Pose2Index(x, y, grid_map, &index_x_, &index_y_);
+  Pose2Index(x, y, std::move(grid_map), &index_x_, &index_y_);
   index_phi_ = static_cast<int>((phi_ - (-M_PI)) / phi_resolution);
   index_ = std::to_string(index_x_) + "_" + std::to_string(index_y_) + "_" + std::to_string(index_phi_);
   traversed_x_.push_back(x);
@@ -39,13 +40,13 @@ Node3d::Node3d(const std::vector<double> &traversed_x,
                double phi_resolution) {
   ROS_ASSERT(traversed_x.size() == traversed_y.size());
   ROS_ASSERT(traversed_x.size() == traversed_phi.size());
-  traversed_x_ = std::move(traversed_x);
-  traversed_y_ = std::move(traversed_y);
-  traversed_phi_ = std::move(traversed_phi);
+  traversed_x_ = traversed_x;
+  traversed_y_ = traversed_y;
+  traversed_phi_ = traversed_phi;
   x_ = traversed_x_.back();
   y_ = traversed_y_.back();
   phi_ = traversed_phi_.back();
-  Pose2Index(x_, y_, grid_map, &index_x_, &index_y_);
+  Pose2Index(x_, y_, std::move(grid_map), &index_x_, &index_y_);
   index_phi_ = static_cast<int>((phi_ - (-M_PI)) / phi_resolution);
   index_ = std::to_string(index_x_) + "_"
       + std::to_string(index_y_) + "_" + std::to_string(index_phi_);
@@ -72,10 +73,10 @@ HybridAStar::HybridAStar(const ros::NodeHandle &nh) {
   nh_.param<double>("/axle_ref_x", axle_ref_x_, 0.3);
   nh_.param<double>("/phi_resolution", phi_resolution_, 0.1);
   nh_.param<double>("/traj_forward_penalty", traj_forward_penalty_, 1.0);
-  nh_.param<double>("/traj_backward_penalty", traj_backward_penalty_, 2.0);
-  nh_.param<double>("/traj_gear_switch_penalty", traj_gear_switch_penalty_, 1.5);
-  nh_.param<double>("/traj_steer_penalty", traj_steer_penalty_, 1.15);
-  nh_.param<double>("/traj_steer_change_penalty", traj_steer_change_penalty_, 1.05);
+  nh_.param<double>("/traj_backward_penalty", traj_backward_penalty_, 1.0);
+  nh_.param<double>("/traj_gear_switch_penalty", traj_gear_switch_penalty_, 1.0);
+  nh_.param<double>("/traj_steer_penalty", traj_steer_penalty_, 0.88);
+  nh_.param<double>("/traj_steer_change_penalty", traj_steer_change_penalty_, 1.0);
   nh_.param<double>("/traj_step_length_penalty", traj_step_length_penalty_, 1.0);
   nh_.param<double>("/step_size", step_size_, 0.7);
   nh_.param<double>("/wheel_base", wheel_base_, 1.2);
@@ -83,49 +84,6 @@ HybridAStar::HybridAStar(const ros::NodeHandle &nh) {
   nh_.param<double>("/delta_t", delta_t_, 0.4);
   nh_.param<double>("/anlytic_expand_distance", anlytic_expand_distance_, 10);
   heuristic_generator_ = std::make_unique<AStar>();
-}
-
-std::unordered_map<std::string, bool> HybridAStar::GenerateCollisionCheckLookUpTable() {
-  int phi_size = std::lround(2.0 * M_PI / phi_resolution_);
-
-  std::unordered_map<std::string, bool> collision_lookup_table;
-  for (int ix = 0; ix < grid_map_->info.width; ++ix) {
-    for (int iy = 0; iy < grid_map_->info.height; ++iy) {
-      for (int itheta = 0; itheta < phi_size; ++itheta) {
-        std::string id = std::to_string(ix) + "_" + std::to_string(iy) + "_" + std::to_string(itheta);
-        double x, y;
-        Index2Pose(ix, iy, grid_map_, &x, &y);
-        double theta = itheta * phi_resolution_ + (-M_PI);
-//                std::cout << "x: " << x << " y : " << y << " phi: " << theta << std::endl;
-        bool result = CheckPose3d(x, y, theta, adc_length_, adc_width_, axle_ref_x_, 1.5, grid_map_);
-        collision_lookup_table.emplace(id, result);
-      }
-    }
-  }
-//    for (const auto& item : collision_lookup_table){
-//        std::cout << "index: " << item.first << ", result: " << item.second << std::endl;
-//    }
-  return collision_lookup_table;
-}
-
-std::unordered_map<std::string, double> HybridAStar::GenerateHeuristicCostLookUpTable() {
-  std::unordered_map<std::string, double> heuristic_lookup_table;
-  int phi_size = std::lround(2.0 * M_PI / phi_resolution_);
-  for (int ix = 0; ix < grid_map_->info.width; ix++) {
-    for (int iy = 0; iy < grid_map_->info.height; iy++) {
-      for (int itheta = 0; itheta < phi_size; itheta++) {
-        std::string id = std::to_string(ix) + "_" + std::to_string(iy) + "_" + std::to_string(itheta);
-        double x, y, theta;
-        Index2Pose(ix, iy, grid_map_, &x, &y);
-        theta = itheta * phi_resolution_ - M_PI;
-        double holon_with_obstacle_h = heuristic_generator_->CheckDpMap(x, y);
-        std::shared_ptr<Node3d> node = std::make_shared<Node3d>(x, y, theta, grid_map_, phi_resolution_);
-        double nonholon_without_obstacle_h = NonHoloWithoutObstacleHeuristic(node);
-        heuristic_lookup_table.emplace(id, std::max(holon_with_obstacle_h, nonholon_without_obstacle_h));
-      }
-    }
-  }
-  return heuristic_lookup_table;
 }
 
 void HybridAStar::RunOnce() {
@@ -137,47 +95,33 @@ void HybridAStar::RunOnce() {
               valid_goal_ ? "true" : "false");
     return;
   }
-
-  std::cout << "start_pose: x: " << start_pose_.pose.pose.position.x << "y: "
-            << start_pose_.pose.pose.position.y << "phi: "
-            << tf::getYaw(start_pose_.pose.pose.orientation) << std::endl;
   int start_id_x, start_id_y;
   Pose2Index(start_pose_.pose.pose.position.x, start_pose_.pose.pose.position.y, grid_map_, &start_id_x,
              &start_id_y);
   double start_x, start_y;
 
   Index2Pose(start_id_x, start_id_y, grid_map_, &start_x, &start_y);
-  if (std::fabs(start_x - start_pose_.pose.pose.position.x) < grid_map_->info.resolution
-      && std::fabs(start_y - start_pose_.pose.pose.position.y) < grid_map_->info.resolution) {
-    ROS_WARN("[The Index2Pose Is correct]");
-  } else {
-    ROS_WARN("[the Index2Pose Is Wrong]");
-  }
-  std::cout << "goal_pose: x: " << goal_pose_.pose.position.x <<
-            " y : " << goal_pose_.pose.position.y << "phi: " <<
-            tf::getYaw(goal_pose_.pose.orientation) << std::endl;
   HybridAStarResult result;
-//    AStarResult result;
+//  AStarResult result;
   double sx = start_pose_.pose.pose.position.x;
   double sy = start_pose_.pose.pose.position.y;
   double sphi = tf::getYaw(start_pose_.pose.pose.orientation);
   double ex = goal_pose_.pose.position.x;
   double ey = goal_pose_.pose.position.y;
   double ephi = tf::getYaw(goal_pose_.pose.orientation);
-//    auto plan_result = heuristic_generator_->SearchPath(sx, sy, ex, ey, &result);
   ros::Time t0 = ros::Time::now();
-
+//  auto plan_result = heuristic_generator_->SearchPath(sx, sy, ex, ey, &result);
   auto plan_result = this->Search(sx, sy, sphi, ex, ey, ephi, &result);
   ros::Time t1 = ros::Time::now();
-  ROS_WARN(" SearchTime: %lf ms", static_cast<double>((t1 - t0).toNSec()) / 1000000.0);
+  ROS_WARN(" SearchTime: %lf ms", (t1 - t0).toSec() * 1000.0);
   if (!plan_result) {
     ROS_FATAL("[HybridAStar::RunOnce]: HybridAStar Search Failed");
     return;
   }
   ROS_WARN("RunOnce, the plan_result: %s", plan_result ? "true" : "false");
   ROS_WARN("RunOnce, result size:  %zu", result.y.size());
-  nav_msgs::Path published_path = this->HybridAStarResult2NavPath(&result);
-//    nav_msgs::Path published_path = this->AStarResult2NavPath(result);
+  nav_msgs::Path published_path = HybridAStar::HybridAStarResult2NavPath(result);
+//  nav_msgs::Path published_path = this->AStarResult2NavPath(result);
   ha_star_path_publisher_.publish(published_path);
   VisualizedPath(published_path);
 
@@ -190,14 +134,17 @@ void HybridAStar::VisualizedPath(const nav_msgs::Path &path) {
   visualization_msgs::Marker pathVehicle;
   visualization_msgs::MarkerArray pathVehicles;
   pathVehicle.header.frame_id = "/map";
-  pathVehicle.header.stamp = ros::Time(0);
-
+  pathVehicle.header.stamp = ros::Time::now();
+  pathVehicle.lifetime = ros::Duration(1.0);
   pathVehicle.type = visualization_msgs::Marker::CUBE;
   pathVehicle.scale.x = adc_length_;
   pathVehicle.scale.y = adc_width_;
   pathVehicle.scale.z = 1;
   pathVehicle.color.a = 0.1;
+
   pathNode.action = visualization_msgs::Marker::ADD;
+  pathNode.lifetime = ros::Duration(1.0);
+
   pathNode.header.frame_id = "/map";
   pathNode.header.stamp = ros::Time::now();
   pathNode.type = visualization_msgs::Marker::SPHERE;
@@ -226,7 +173,7 @@ void HybridAStar::VisualizedPath(const nav_msgs::Path &path) {
 
 }
 
-nav_msgs::Path HybridAStar::AStarResult2NavPath(planning::AStarResult astar_result) {
+nav_msgs::Path HybridAStar::AStarResult2NavPath(const planning::AStarResult &astar_result) {
   size_t result_size = astar_result.x.size();
   nav_msgs::Path path;
   path.header.frame_id = "/path";
@@ -241,16 +188,16 @@ nav_msgs::Path HybridAStar::AStarResult2NavPath(planning::AStarResult astar_resu
   return path;
 }
 
-nav_msgs::Path HybridAStar::HybridAStarResult2NavPath(planning::HybridAStarResult *result) {
-  size_t result_size = result->x.size();
+nav_msgs::Path HybridAStar::HybridAStarResult2NavPath(const planning::HybridAStarResult &result) {
+  size_t result_size = result.x.size();
   nav_msgs::Path path;
   path.header.frame_id = "/path";
   path.header.stamp = ros::Time::now();
   path.poses.resize(result_size);
   for (size_t i = 0; i < result_size; ++i) {
-    const double x = (*result).x[i];
-    const double y = (*result).y[i];
-    const double phi = (*result).phi[i];
+    const double x = result.x[i];
+    const double y = result.y[i];
+    const double phi = result.phi[i];
     path.poses[i].pose.position.x = x;
     path.poses[i].pose.position.y = y;
     tf::Quaternion q;
@@ -279,54 +226,33 @@ bool HybridAStar::Search(double sx, double sy,
   result->accumulated_s.clear();
   result->v.clear();
   start_node_.reset(
-      new Node3d({sx}, {sy}, {sphi}, grid_map_, phi_resolution_));
+      new Node3d(sx, sy, sphi, grid_map_, phi_resolution_));
   start_node_->SetDirection(true);
-//    end_node_.reset(new Node3d(
-//        {ex}, {ey}, {ephi}, grid_map_, phi_resolution_));
   open_set_.clear();
-  open_pq_ = decltype(open_pq_)();
-//    priority_queue_.clear();
-//    open_set_handles_.clear();
+  priority_queue_ = decltype(priority_queue_)();
+  open_set_handles_ = decltype(open_set_handles_)();
   closed_set_.clear();
   final_node_ = nullptr;
   if (!CheckNode3d(start_node_)) {
     ROS_ERROR("[HybridAStar::Search], the start node is not collision free");
     return false;
   }
-  ros::Time begin = ros::Time::now();
   if (!CheckNode3d(end_node_)) {
     ROS_ERROR("[HybridAStar::Search], the end node is not collision free");
     return false;
   }
-  ros::Time end = ros::Time::now();
-  ROS_WARN("[CheckNode3d] time elapsed: %lf ms", (end - begin).toNSec() / 1000000.0);
-//    if (!heuristic_generator_->GenerateDpMap(ex, ey)) {
-//        ROS_FATAL("[Search] , to generate dp map failed");
-//        return false;
-//    }
-//    auto collision_lookup_table = GenerateCollisionCheckLookUpTable();
-//    auto heuristic_lookup_table = GenerateHeuristicCostLookUpTable();
-//    open_set_handles_.emplace(start_node_->GetIndex(), priority_queue_.emplace(start_node_));
   open_set_.emplace(start_node_->GetIndex(), start_node_);
-  open_pq_.emplace(start_node_);
-//    open_qp.emplace(start_node_->GetIndex(), start_node_->GetFCost());
+  auto handle = priority_queue_.emplace(start_node_);
+  open_set_handles_.emplace(start_node_->GetIndex(), handle);
   int expand_node_num = 0;
   double tie_breaker = 1.01;
   int cnt = 0;
-  double analytic_expand_time = 0.0;
-  double heuristic_calc_time = 0.0;
-  double expand_node_time = 0.0;
-  double check_node_time = 0.0;
-  ros::Time tt0 = ros::Time::now();
-  while (!open_pq_.empty()) {
+  while (!priority_queue_.empty()) {
     cnt++;
-//        std::shared_ptr<Node3d> current_node = priority_queue_.top();
-
-    const std::string current_id = open_pq_.top()->GetIndex();
-    std::shared_ptr<Node3d> current_node = open_set_[current_id];
-    open_pq_.pop();
-    open_set_.erase(current_id);
-//        open_set_handles_.erase(current_id);
+    const auto current_node = priority_queue_.top();
+    priority_queue_.pop();
+    open_set_.erase(current_node->GetIndex());
+    open_set_handles_.erase(current_node->GetIndex());
     ros::Time t0 = ros::Time::now();
     if (current_node->IsInRange(end_node_, anlytic_expand_distance_)) {
       if (AnalyticExpansion(current_node)) {
@@ -334,8 +260,6 @@ bool HybridAStar::Search(double sx, double sy,
       }
     }
     ros::Time t1 = ros::Time::now();
-    analytic_expand_time += static_cast<double>((t1 - t0).toNSec()) / 1000000.0;
-//        ROS_WARN("[AnalyticExpansion]: time: %lf ms", (end - begin).toNSec() / 1000000.0);
     if (*(current_node) == *(end_node_)) {
       final_node_ = current_node;
       break;
@@ -343,85 +267,39 @@ bool HybridAStar::Search(double sx, double sy,
     closed_set_.emplace(current_node->GetIndex(), current_node);
     t0 = ros::Time::now();
     for (size_t i = 0; i < next_node_num_; ++i) {
-      std::shared_ptr<Node3d> next_node = std::move(NextNodeGenerator(current_node, i));
+      std::shared_ptr<Node3d> next_node = NextNodeGenerator(current_node, i);
       if (next_node == nullptr) {
         continue;
       }
       if (closed_set_.find(next_node->GetIndex()) != closed_set_.end()) {
-//                ROS_INFO("next node is in closed set");
         continue;
       }
-
-//            bool check_result = CheckNode3d(next_node);
-      bool check_result = true;
-      int start_check_idx = 0;
-      if (next_node->GetStepSize() == 1) {
-        start_check_idx = 0;
-      } else {
-        start_check_idx = 1;
-      }
-      for (int j = start_check_idx; j < next_node->GetStepSize(); ++j) {
-        std::string id;
-        double x = next_node->GetXs()[j];
-        double y = next_node->GetYs()[j];
-        double phi = next_node->GetPhis()[j];
-        int ix, iy;
-        Pose2Index(x, y, grid_map_, &ix, &iy);
-        int iphi = static_cast<int>((phi + M_PI) / phi_resolution_);
-        id = std::to_string(ix) + "_" + std::to_string(iy) + "_" + std::to_string(iphi);
-        if (!collision_lookup_table_[id]) {
-          check_result = false;
-        }
-      }
-
-      check_node_time += static_cast<double>((t1 - t0).toNSec()) / 1000000.0;
+      bool check_result = CheckNode3d(next_node);
       if (!check_result) {
-//                ROS_INFO("next node is not collision free, index : %zu", i);
         continue;
       }
-
-      double tentative_gcost = current_node->GetGCost() + 0.35 * EdgeCost(current_node, next_node);
-//            next_node->SetGCost(current_node->GetGCost() + EdgeCost(current_node, next_node));
-      /// node not in open set, appead into openset and priority queue
+      double tentative_gcost = current_node->GetGCost() + EdgeCost(current_node, next_node);
       if (open_set_.find(next_node->GetIndex()) == open_set_.end()) {
         expand_node_num++;
         next_node->SetGCost(tentative_gcost);
-//                next_node->SetHCost(HoloWithObstacleHeuristic(next_node));
-//                t0 = ros::Time::now();
-//                next_node->SetHCost(heuristic_lookup_table_[next_node->GetIndex()]);
-        next_node->SetHCost(0.65 * std::max(
-            HoloWithObstacleHeuristic(next_node),
-            NonHoloWithoutObstacleHeuristic(next_node)));
-//                std::cout << "g cost : " << next_node->GetGCost() << " hcost: " << next_node->GetFCost() << std::endl;
-//                t1 = ros::Time::now();
-//                heuristic_calc_time += static_cast<double>((t1 - t0).toNSec()) / 1000000.0;
+
+        next_node->SetHCost(std::max(HoloWithObstacleHeuristic(next_node), NonHoloWithoutObstacleHeuristic(next_node)));
+
         next_node->SetPreNode(current_node);
         open_set_.emplace(next_node->GetIndex(), next_node);
-        open_pq_.emplace(next_node);
-//                open_set_handles_.emplace(next_node->GetIndex(), next_handle);
+        auto next_handle = priority_queue_.emplace(next_node);
+        open_set_handles_.emplace(next_node->GetIndex(), next_handle);
+      } else if (open_set_[next_node->GetIndex()]->GetGCost() > tentative_gcost) {
+        open_set_[next_node->GetIndex()]->SetGCost(tentative_gcost);
+        open_set_[next_node->GetIndex()]->SetPreNode(current_node);
+        priority_queue_.update(open_set_handles_[next_node->GetIndex()], open_set_[next_node->GetIndex()]);
       }
-      t1 = ros::Time::now();
-      expand_node_time += static_cast<double>((t1 - t0).toNSec()) / 1000000.0;
-//            else {
-//                if (open_set_[next_node->GetIndex()]->GetGCost() > tentative_gcost ) {
-//                    open_set_[next_node->GetIndex()]->SetGCost(tentative_gcost);
-//                    open_set_[next_node->GetIndex()]->SetPreNode(current_node);
-////                    priority_queue_.push(open_set_[next_node->GetIndex()]);
-////                    priority_queue_.update(open_set_handles_[next_node->GetIndex()],
-////                                           open_set_[next_node->GetIndex()]);
-//                }
-//            }
-      if (cnt > 100000) {
-        return false;
-      }
-
+    }
+    if (cnt > 100000) {
+      return false;
     }
   }
-  ros::Time tt1 = ros::Time::now();
-  ROS_WARN("expand total time: %lf ms", static_cast<double>((tt1 - tt0).toNSec()) / 1000000.0);
-  ROS_WARN("analytic_expand_time: %lf, expand_node_time: %lf",
-           analytic_expand_time, expand_node_time);
-  ROS_WARN("[Search]: complete, the expanded node num is : %i", expand_node_num);
+
   if (final_node_ == nullptr) {
     ROS_ERROR("[Search], the final node_ is nullptr");
     return false;
@@ -473,18 +351,18 @@ bool HybridAStar::LoadResult(planning::HybridAStarResult *result) {
     return false;
   }
   HybridAStarResult stitched_result;
-  for (const auto &result : partitioned_results) {
-    std::copy(result.x.begin(), result.x.end() - 1,
+  for (const auto &res : partitioned_results) {
+    std::copy(res.x.begin(), res.x.end() - 1,
               std::back_inserter(stitched_result.x));
-    std::copy(result.y.begin(), result.y.end() - 1,
+    std::copy(res.y.begin(), res.y.end() - 1,
               std::back_inserter(stitched_result.y));
-    std::copy(result.phi.begin(), result.phi.end() - 1,
+    std::copy(res.phi.begin(), res.phi.end() - 1,
               std::back_inserter(stitched_result.phi));
-    std::copy(result.v.begin(), result.v.end() - 1,
+    std::copy(res.v.begin(), res.v.end() - 1,
               std::back_inserter(stitched_result.v));
-    std::copy(result.a.begin(), result.a.end(),
+    std::copy(res.a.begin(), res.a.end(),
               std::back_inserter(stitched_result.a));
-    std::copy(result.steer.begin(), result.steer.end(),
+    std::copy(res.steer.begin(), res.steer.end(),
               std::back_inserter(stitched_result.steer));
   }
   stitched_result.x.push_back(partitioned_results.back().x.back());
@@ -506,7 +384,7 @@ bool HybridAStar::LoadResult(planning::HybridAStarResult *result) {
 }
 
 std::shared_ptr<Node3d> HybridAStar::NextNodeGenerator(
-    std::shared_ptr<planning::Node3d> current_node,
+    const std::shared_ptr<planning::Node3d> &current_node,
     size_t next_node_index) {
   double steering = 0.0;
   double traveled_distance = 0.0;
@@ -548,60 +426,44 @@ std::shared_ptr<Node3d> HybridAStar::NextNodeGenerator(
     last_y = next_y;
     last_phi = next_phi;
   }
-//    ROS_INFO("GenerateNextNode3d, next_node.GetStepSize() = %zu", intermediate_x.size());
   std::shared_ptr<Node3d> next_node = std::make_shared<Node3d>(
       intermediate_x, intermediate_y, intermediate_phi,
       grid_map_, phi_resolution_);
 
-//    next_node->SetPreNode(current_node);
   next_node->SetSteering(steering);
   next_node->SetDirection(traveled_distance > 0.0);
-//    next_node->SetGCost(current_node->GetGCost() + EdgeCost(current_node, next_node));
-  return std::move(next_node);
+  return next_node;
 }
 
-double HybridAStar::EdgeCost(std::shared_ptr<planning::Node3d> current_node,
-                             std::shared_ptr<planning::Node3d> next_node) {
-  // backward motion
-//    double edge_cost = 0.0;
-  double edge_cost = (next_node->GetStepSize() - 1) * step_size_ * traj_step_length_penalty_;
+double HybridAStar::EdgeCost(const std::shared_ptr<planning::Node3d> &current_node,
+                             const std::shared_ptr<planning::Node3d> &next_node) const {
 
-//    double total_penalty = traj_forward_penalty_ + traj_backward_penalty_ + traj_gear_switch_penalty_
-//        + traj_step_length_penalty_ + traj_gear_switch_penalty_ + traj_steer_penalty_ + traj_steer_change_penalty_;
-//    ROS_INFO("[EdgeCost]: next_node->GetDirection() %s", next_node->GetDirection() ? "forward" : "backward");
-  double coeff = 1.0;
+  double edge_cost = static_cast<double>((next_node->GetStepSize() - 1)) * step_size_ * traj_step_length_penalty_;
+
   if (next_node->GetDirection()) {
-    coeff *= traj_forward_penalty_;
-//        edge_cost += traj_forward_penalty_ * (next_node->GetStepSize() - 1) * step_size_;
+    edge_cost += traj_forward_penalty_ * (next_node->GetStepSize() - 1) * step_size_;
   } else {
-    coeff *= traj_backward_penalty_;
-//        edge_cost += traj_backward_penalty_ * (next_node->GetStepSize() - 1) * step_size_;
+    edge_cost += traj_backward_penalty_ * (next_node->GetStepSize() - 1) * step_size_;
   }
-//    edge_cost *= coeff;
   if (current_node->GetDirection() != next_node->GetDirection()) {
-    coeff *= traj_gear_switch_penalty_;
-//        ROS_INFO("[EdgeCost]: the current node direction diffs from next node direction");
-//        edge_cost += traj_gear_switch_penalty_;
+    edge_cost += traj_gear_switch_penalty_;
   }
-//    double steer_cost = 0.0;
   if (std::fabs(next_node->GetSteering()) > phi_resolution_) {
-    coeff *= traj_steer_penalty_;
-//    steer_cost += traj_steer_penalty_ * std::fabs(next_node->GetSteering());
-//    edge_cost += traj_steer_penalty_ * std::fabs(next_node->GetSteering());
+    edge_cost += traj_steer_penalty_ * std::fabs(next_node->GetSteering());
   }
   if (std::fabs(next_node->GetSteering() - current_node->GetSteering()) > phi_resolution_) {
-//    edge_cost += traj_steer_change_penalty_ *
-//        std::fabs(next_node->GetSteering() - current_node->GetSteering());
-    coeff *= traj_steer_change_penalty_;
+    edge_cost += traj_steer_change_penalty_ *
+        std::fabs(next_node->GetSteering() - current_node->GetSteering());
   }
-
-  return (edge_cost * coeff);
+  return edge_cost;
 
 }
 
 double HybridAStar::HoloWithObstacleHeuristic(
-    std::shared_ptr<planning::Node3d> next_node) {
-//    return std::hypot(next_node->GetX() - end_node_->GetX(), next_node->GetY() - end_node_->GetY());
+    const std::shared_ptr<planning::Node3d> &next_node) {
+  if (!has_dp_map_) {
+    return 0.0;
+  }
   return (heuristic_generator_->CheckDpMap(
       next_node->GetX(),
       next_node->GetY()));
@@ -609,7 +471,7 @@ double HybridAStar::HoloWithObstacleHeuristic(
 }
 
 double HybridAStar::NonHoloWithoutObstacleHeuristic(
-    std::shared_ptr<planning::Node3d> next_node) const {
+    const std::shared_ptr<planning::Node3d> &next_node) const {
 
   ////////////////// dubin cost //////////////////////
   double non_holo_heu = 0.0;
@@ -643,32 +505,28 @@ double HybridAStar::NonHoloWithoutObstacleHeuristic(
   return non_holo_heu;
 }
 
-bool HybridAStar::CheckNode3d(std::shared_ptr<Node3d> node) {
+bool HybridAStar::CheckNode3d(const std::shared_ptr<Node3d> &node) {
   size_t node_step_size = node->GetStepSize();
   auto traversed_x = node->GetXs();
   auto traversed_y = node->GetYs();
   auto traversed_phi = node->GetPhis();
   size_t check_start_index = 0;
-  if (node_step_size == 1) {
-    check_start_index = 0;
-  } else {
+  if (node_step_size > 1) {
     check_start_index = 1;
   }
-//    std::cout << "node_step_size: " << node_step_size << std::endl;
   for (size_t i = check_start_index; i < node_step_size; ++i) {
     const double x = traversed_x[i];
     const double y = traversed_y[i];
     const double phi = traversed_phi[i];
     if (!CheckPose3d(x, y, phi, adc_length_,
-                     adc_width_, axle_ref_x_, 1.5, grid_map_)) {
-//            ROS_INFO("[CheckNode3d], the constraint check failed");
+                     adc_width_, axle_ref_x_, 0.5, grid_map_)) {
       return false;
     }
   }
   return true;
 }
 
-bool HybridAStar::AnalyticExpansion(std::shared_ptr<Node3d> current_node) {
+bool HybridAStar::AnalyticExpansion(const std::shared_ptr<Node3d> &current_node) {
   if (current_node == nullptr) {
     ROS_ERROR("[HybridAStar::AnalyticExpansion], "
               "the input current node is nullptr");
@@ -700,7 +558,7 @@ bool HybridAStar::AnalyticExpansion(std::shared_ptr<Node3d> current_node) {
   }
 }
 
-std::shared_ptr<Node3d> HybridAStar::DubinShot(std::shared_ptr<planning::Node3d> node, double *len) {
+std::shared_ptr<Node3d> HybridAStar::DubinShot(const std::shared_ptr<planning::Node3d> &node, double *len) {
   if (node == nullptr) {
     return nullptr;
   }
@@ -741,7 +599,7 @@ std::shared_ptr<Node3d> HybridAStar::DubinShot(std::shared_ptr<planning::Node3d>
 }
 
 std::shared_ptr<Node3d> HybridAStar::ReedsSheppShot(
-    std::shared_ptr<planning::Node3d> node, double *len) {
+    const std::shared_ptr<planning::Node3d> &node, double *len) {
 
   if (node == nullptr) {
     return nullptr;
@@ -860,5 +718,74 @@ bool HybridAStar::TrajectoryPartition(
 
   }
   return true;
+}
+void HybridAStar::SetGoal(const geometry_msgs::PoseStamped_<std::allocator<void>>::Ptr &goal) {
+  if (!has_grid_map_) {
+    return;
+  }
+  bool new_goal = true;
+  if (std::hypot(goal->pose.position.x - goal_pose_.pose.position.x,
+                 goal->pose.position.y - goal_pose_.pose.position.y) < grid_map_->info.resolution &&
+      CalcAngleDist(tf::getYaw(goal->pose.orientation), tf::getYaw(goal_pose_.pose.orientation)) < phi_resolution_) {
+    new_goal = false;
+  }
+  if (!CheckPose3d(
+      goal->pose.position.x,
+      goal->pose.position.y,
+      tf::getYaw(goal->pose.orientation),
+      adc_length_, adc_width_,
+      axle_ref_x_, 2.0 * grid_map_->info.resolution, grid_map_)) {
+    valid_goal_ = false;
+    return;
+  }
+  goal_pose_ = *goal;
+
+  valid_goal_ = true;
+//  heuristic_lookup_table_.clear();
+
+  if (valid_goal_ && has_grid_map_) {
+    heuristic_generator_->SetMap(grid_map_);
+    heuristic_generator_->SetVhicleParams(adc_length_, adc_width_, axle_ref_x_);
+    if (!heuristic_generator_->GenerateDpMap(goal_pose_.pose.position.x, goal_pose_.pose.position.y)) {
+      has_dp_map_ = false;
+      return;
+    }
+    has_dp_map_ = true;
+    std::vector<double> xs{goal_pose_.pose.position.x};
+    std::vector<double> ys{goal_pose_.pose.position.y};
+    std::vector<double> phis{tf::getYaw(goal_pose_.pose.orientation)};
+    end_node_.reset(new Node3d(xs,ys,phis,
+        grid_map_, phi_resolution_));
+  }
+}
+
+void HybridAStar::CalcNodCost(const std::shared_ptr<Node3d> &current_node, const std::shared_ptr<Node3d> &next_node) {
+  next_node->SetGCost(current_node->GetGCost() + EdgeCost(current_node, next_node));
+  double optimal_path_cost = 0.0;
+  optimal_path_cost += std::max(HoloWithObstacleHeuristic(next_node), NonHoloWithoutObstacleHeuristic(next_node));
+  next_node->SetHCost(optimal_path_cost);
+}
+void HybridAStar::SetStart(const geometry_msgs::PoseWithCovarianceStamped_<std::allocator<void>>::Ptr &start) {
+  if (!has_grid_map_) {
+    return;
+  }
+  if (!CheckPose3d(start->pose.pose.position.x, start->pose.pose.position.y, tf::getYaw(start->pose.pose.orientation),
+      adc_length_, adc_width_, axle_ref_x_, 2.0 * grid_map_->info.resolution, grid_map_)) {
+    valid_start_ = false;
+    return;
+  }
+  start_pose_ = *start;
+  valid_start_ = true;
+}
+
+void HybridAStar::SetMap(const nav_msgs::OccupancyGrid_<std::allocator<void>>::Ptr &grid_map) {
+  grid_map_ = grid_map;
+  std::cout << "grid_map_: width : " << grid_map_->info.width <<
+            " height: " << grid_map_->info.height << std::endl;
+  has_grid_map_ = true;
+}
+
+bool HybridAStar::cmp::operator()(const std::shared_ptr<Node3d> &left, const std::shared_ptr<Node3d> &right) const {
+  return left->GetFCost() >= right->GetFCost();
 }
 }

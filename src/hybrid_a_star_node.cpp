@@ -19,7 +19,7 @@ int main(int argc, char** argv) {
         hybrid_a_star->RunOnce();
         ros::Time end = ros::Time::now();
         ros::Duration d(end - begin);
-        ROS_WARN("[RUNONCE Time: %lf ms]", d.toNSec() / 1000000.0);
+        ROS_WARN("[RUNONCE Time: %lf ms]", d.toSec() * 1000.0);
     }
     return 0;
 }

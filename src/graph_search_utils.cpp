@@ -92,14 +92,13 @@ bool CheckPose3d(double base_x, double base_y, double base_phi,
             }
         }
     }
-//    ROS_INFO("CheckPose3d End");
     return true;
 }
 
 bool CheckCircleRobotPose(double x, double y, double raidus,
                           nav_msgs::OccupancyGrid::Ptr grid_map){
-    for (double theta = -M_PI; theta < M_PI; theta += 0.2){
-        for (double r = 0.0; r < raidus; r += 0.2){
+    for (double theta = -M_PI; theta < M_PI; theta += 1.0 / 6.0 * M_PI){
+        for (double r = 0.0; r < raidus; r += grid_map->info.resolution){
             double robot_x = x + r * std::cos(theta);
             double robot_y = y + r * std::sin(theta);
             if (!CheckPose2d(robot_x, robot_y, grid_map)){

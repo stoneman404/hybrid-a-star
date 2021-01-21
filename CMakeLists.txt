@@ -167,6 +167,10 @@ target_link_libraries(${PROJECT_NAME}_node
 ## Install ##
 #############
 
+
+install(DIRECTORY launch/
+        DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch)
+
 # all install targets should use catkin DESTINATION variables
 # See http://ros.org/doc/api/catkin/html/adv_user_guide/variables.html
 
